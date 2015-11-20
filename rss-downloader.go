@@ -30,7 +30,7 @@ type Item struct {
 type Channel struct {
 	Title       string    `xml:"title"`
 	Link        string    `xml:"link"`
-	PubDate     time.Time `xml: pubDate`
+	PubDate     string 	  `xml:"lastBuildDate"`
 	Description string    `xml:"description"`
 	Items       []*Item   `xml:"item"`
 }
@@ -46,12 +46,14 @@ func (f *Feed) Parse(body []byte) error {
 
 func (f Feed) String() string {
 	var res string
-	res += fmt.Sprintf("Feed: %s (%s)\n", f.Channel.Title,f.Channel.Link)
+	channel_date,_ := time.Parse(time.RFC1123Z,f.Channel.PubDate)
+	res += fmt.Sprintf("Feed: %s (%s) /%v/\n", f.Channel.Title,f.Channel.Link,channel_date)
 	for _, item := range f.Channel.Items {
+		d,_ := time.Parse(time.RFC1123Z,item.PubDate)
 		res += fmt.Sprintf("\t%s\n", item.Link)
 		res += fmt.Sprintf("\t%s\n", item.Title)
+		res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,d)
 		res += fmt.Sprintf("\t%s\n\n", item.Description)
-		
 	}
 	return res
 }
