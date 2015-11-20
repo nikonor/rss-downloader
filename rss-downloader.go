@@ -46,10 +46,16 @@ func (f *Feed) Parse(body []byte) error {
 
 func (f Feed) String() string {
 	var res string
-	channel_date,_ := time.Parse(time.RFC1123Z,f.Channel.PubDate)
+	channel_date,cd_err := time.Parse(time.RFC1123Z,f.Channel.PubDate)
+	if cd_err != nil {
+		channel_date,_ = time.Parse(time.RFC1123,f.Channel.PubDate)
+	}
 	res += fmt.Sprintf("Feed: %s (%s) /%v/\n", f.Channel.Title,f.Channel.Link,channel_date)
 	for _, item := range f.Channel.Items {
-		d,_ := time.Parse(time.RFC1123Z,item.PubDate)
+		d,d_err := time.Parse(time.RFC1123Z,item.PubDate)
+		if d_err != nil {
+			d,_ = time.Parse(time.RFC1123,item.PubDate)
+		}
 		res += fmt.Sprintf("\t%s\n", item.Link)
 		res += fmt.Sprintf("\t%s\n", item.Title)
 		res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,d)
