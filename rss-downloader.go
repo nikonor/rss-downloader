@@ -61,9 +61,9 @@ func (f Feed) String() string {
 			item_date,_ = time.Parse(time.RFC1123,item.PubDate)
 		}
 		res += fmt.Sprintf("\t%s\n", item.Link)
-		res += fmt.Sprintf("\t%s\n", item.Title)
-		res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,item_date)
-		res += fmt.Sprintf("\t%s\n\n", item.Description)
+		res += fmt.Sprintf("\t%s, %s\n\n", item.Title,item_date)
+		// res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,item_date)
+		// res += fmt.Sprintf("\t%s\n\n", item.Description)
 	}
 	return res
 }
@@ -93,7 +93,7 @@ func main() {
 
 	for _, rss := range conf {
 		fmt.Printf("%s=%v\n",rss.Name,rss.LastPubDate);
-		go get_data(rss.Name, rss.URL, data_chan)
+		go get_data(rss.Name, rss.URL, data_chan, rss.LastPubDate)
 	}
 
 	for i := 0; i < int(rss_count); i++ {
@@ -103,7 +103,7 @@ func main() {
 	fmt.Println("Finish main")
 }
 
-func get_data(name string, url string, ch chan Feed) {
+func get_data(name string, url string, ch chan Feed, lastPubDate time.Time) {
 	response, err := http.Get(url)
 
 	if err != nil {
@@ -116,16 +116,32 @@ func get_data(name string, url string, ch chan Feed) {
 		fmt.Printf("%s", err)
 		os.Exit(1)
 	}
-	ch <- parse_rss(contents)
+	ch <- parse_rss(contents, lastPubDate)
 }
 
 
-func parse_rss(rss []byte) Feed {
+func parse_rss(rss []byte, lastPubDate time.Time) Feed {
 	f := Feed{}
+	var f_items []*Item
+
 	err := f.Parse(rss)
+
+	for _, item := range f.Channel.Items {
+		item_date,d_err := time.Parse(time.RFC1123Z,item.PubDate)
+		if d_err != nil {
+			item_date,_ = time.Parse(time.RFC1123,item.PubDate)
+		}
+
+		if item_date.After(lastPubDate) {
+			f_items = append(f_items,item)
+		}
+	}
+
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	f.Channel.Items = f_items
 
 	return f
 }
