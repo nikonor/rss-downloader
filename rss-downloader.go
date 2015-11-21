@@ -11,6 +11,8 @@ import (
 	"time"
 	"os/user"
 	"github.com/robfig/config"
+	"html/template"
+	"bytes"
 )
 
 const timeForm = "2006-01-02 15:04:05 +0000 MST"
@@ -49,23 +51,56 @@ func (f *Feed) Parse(body []byte) error {
 }
 
 func (f Feed) String() string {
-	var res string
-	channel_date,cd_err := time.Parse(time.RFC1123Z,f.Channel.PubDate)
-	if cd_err != nil {
-		channel_date,_ = time.Parse(time.RFC1123,f.Channel.PubDate)
+	var body bytes.Buffer
+	const tmpl = `
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+	</head>
+	<body>
+		<div><b>{{.Title}}</b></div>
+		<hr>
+		{{range .Items}}
+		<div>
+			<a href="{{.Link}}">{{.Title}} /{{.Date}}/</a><br>
+			<div>
+			{{.Text}}
+			</div>
+		</div>
+		<hr>
+		{{end}}
+	</body>
+</html>`
+
+	type Rec struct {
+		Title string
+		Link string
+		Date string
+		Text interface{}
 	}
-	res += fmt.Sprintf("Feed: %s (%s) /%v/\n", f.Channel.Title,f.Channel.Link,channel_date)
+
+	var recs []Rec
+
+	data := struct {
+		Title string
+		URL string
+		Items []Rec
+	}{
+		Title:"",
+		URL:"",
+		Items:recs,
+	}
+
+
+	data.Title = f.Channel.Title
 	for _, item := range f.Channel.Items {
-		item_date,d_err := time.Parse(time.RFC1123Z,item.PubDate)
-		if d_err != nil {
-			item_date,_ = time.Parse(time.RFC1123,item.PubDate)
-		}
-		res += fmt.Sprintf("\t%s\n", item.Link)
-		res += fmt.Sprintf("\t%s, %s\n\n", item.Title,item_date)
-		// res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,item_date)
-		// res += fmt.Sprintf("\t%s\n\n", item.Description)
+		data.Items = append(data.Items,Rec{	Title:item.Title, Link:item.Link, Date: item.PubDate, Text: template.HTML(item.Description) })
 	}
-	return res
+	
+	t,_ := template.New("webpage").Parse(tmpl)
+	t.Execute(&body, data)
+	return body.String()
 }
 
 var (
