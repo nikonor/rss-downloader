@@ -10,11 +10,15 @@ import (
 	"strings"
 	"time"
 	"os/user"
+	"github.com/robfig/config"
 )
+
+const timeForm = "2006-01-02 15:04:05 +0000 MST"
 
 type link struct {
 	Name string
 	URL  string
+	LastPubDate time.Time
 }
 
 type Item struct {
@@ -52,13 +56,13 @@ func (f Feed) String() string {
 	}
 	res += fmt.Sprintf("Feed: %s (%s) /%v/\n", f.Channel.Title,f.Channel.Link,channel_date)
 	for _, item := range f.Channel.Items {
-		d,d_err := time.Parse(time.RFC1123Z,item.PubDate)
+		item_date,d_err := time.Parse(time.RFC1123Z,item.PubDate)
 		if d_err != nil {
-			d,_ = time.Parse(time.RFC1123,item.PubDate)
+			item_date,_ = time.Parse(time.RFC1123,item.PubDate)
 		}
 		res += fmt.Sprintf("\t%s\n", item.Link)
 		res += fmt.Sprintf("\t%s\n", item.Title)
-		res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,d)
+		res += fmt.Sprintf("\t%s=%v!\n", item.PubDate,item_date)
 		res += fmt.Sprintf("\t%s\n\n", item.Description)
 	}
 	return res
@@ -66,8 +70,9 @@ func (f Feed) String() string {
 
 var (
 	conf      []link
-	rss_count int64
+	rss_count int
 	rsses     []rss
+	email	string
 )
 
 type rss struct {
@@ -75,35 +80,10 @@ type rss struct {
 }
 
 func init() {
-	usr, _ := user.Current()
-	conf_file, err := os.Open(strings.Join([]string{usr.HomeDir,".rss-downloader.conf"},"/"))
-	defer conf_file.Close()
-	if err != nil {
-		log.Fatal(err)
-	}
 
-	fi, err := conf_file.Stat()
-	if err != nil {
-		log.Fatal(err)
-	}
+	email,conf = readConfig("")
+	rss_count = len(conf)
 
-	conf_body_b := make([]byte, fi.Size())
-
-	size, err := conf_file.Read(conf_body_b)
-	if err != nil {
-		log.Fatal(err)
-	} else if int64(size) != fi.Size() {
-		log.Fatal("Ошибка чтения файла")
-	}
-	conf_body_s := string(conf_body_b[:size])
-
-	for _, s := range strings.Split(conf_body_s, "\n") {
-		ss := strings.SplitN(s, ";", 3)
-		if len(ss) == 3 {
-			conf = append(conf, link{ss[1], ss[2]})
-			rss_count++
-		}
-	}
 }
 
 func main() {
@@ -112,6 +92,7 @@ func main() {
 	data_chan := make(chan Feed, rss_count)
 
 	for _, rss := range conf {
+		fmt.Printf("%s=%v\n",rss.Name,rss.LastPubDate);
 		go get_data(rss.Name, rss.URL, data_chan)
 	}
 
@@ -147,4 +128,32 @@ func parse_rss(rss []byte) Feed {
 	}
 
 	return f
+}
+
+func readConfig(filename string) (string, []link){
+	var conf []link
+	var email string
+	if filename == "" {
+		usr, _ := user.Current()
+		filename = strings.Join([]string{usr.HomeDir,".rss-downloader.conf"},"/")
+	}
+
+	cfg, err := config.ReadDefault(filename)
+	if err != nil {
+		panic("Error on read config file")
+	}
+	sections := cfg.Sections()
+	for i := range sections {
+
+		if sections[i] == "DEFAULT" {
+			email, _ = cfg.String(sections[i], "email")
+		} else {
+			fmt.Printf("!%s!\n", sections[i])
+			url, _ := cfg.String(sections[i], "url")
+			t_string, _ := cfg.String(sections[i], "lastPubDate")
+			t_time,_ := time.Parse(timeForm,t_string)
+			conf = append(conf, link{sections[i],url,t_time})
+		}	
+	}
+	return email,conf
 }
