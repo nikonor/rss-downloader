@@ -2,7 +2,7 @@
 email=nikonor@nikonor.ru
 smtp_login=e@mail
 smtp_passwd=PasSwOrD
-smtp_server="smtp.yandex.ru:465"
+smtp_server=smtp.yandex.ru:465
 
 [Lifehacker.ru]
 url=http://lifehacker.ru/feed/
