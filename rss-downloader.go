@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/smtp"
 	"os"
 	"os/user"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/robfig/config"
 	"html/template"
 	"bytes"
+	"crypto/tls"
 )
 
 const timeForm = "2006-01-02 15:04:05 +0000 MST"
@@ -64,7 +66,7 @@ func (f *Feed) Parse(body []byte) error {
 
 func (f Feed) String() string {
 	var body bytes.Buffer
-	const tmpl = `
+	const tmpl = `{{.Title}}
 <!DOCTYPE html>
 <html>
 	<head>
@@ -140,9 +142,11 @@ func main() {
 
 	for i := 0; i < int(rss_count); i++ {
 		ss := <-data_chan
+		tmp := strings.SplitN(ss.String(),"\n",2); title := tmp[0]; body := tmp[1]
+
 		mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n";
-		header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: RSS Downloader digest!\n"
-		msg := []byte(header + mime + ss.String())		
+		header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: "+title+" by RSS Downloader\n"
+		msg := []byte(header + mime + body)		
 		// fmt.Printf("===========\n%s\n===========\n",msg)
 		err := send_digest(smtp_conn,msg)
 		if err != nil {
@@ -197,9 +201,6 @@ func parse_rss(rss []byte, lastPubDate time.Time) Feed {
 	return f
 }
 
-func send_digest (conn smtp_conn_type, msg []byte) (error) {
-	return nil
-}
 
 func readConfig(filename string) (string, smtp_conn_type, []link){
 	var (
@@ -234,4 +235,60 @@ func readConfig(filename string) (string, smtp_conn_type, []link){
 	}
 
 	return email,s_conn,conf
+}
+
+func send_digest (smtp_conn smtp_conn_type, msg []byte) (error) {
+	servername := strings.Join([]string{smtp_conn.Host,smtp_conn.Port},":")
+
+	auth := smtp.PlainAuth("",smtp_conn.Login, smtp_conn.Password, smtp_conn.Host)
+
+    // TLS config
+    tlsconfig := &tls.Config {
+        InsecureSkipVerify: true,
+        ServerName: smtp_conn.Host,
+    }
+
+    conn, err := tls.Dial("tcp", ""+servername, tlsconfig)
+    if err != nil {
+        return err
+    }
+
+    c, err := smtp.NewClient(conn, smtp_conn.Host)
+    if err != nil {
+        return err
+    }
+
+    // Auth
+    if err = c.Auth(auth); err != nil {
+        return err
+    }
+
+ 	// To && From
+    if err = c.Mail(smtp_conn.Login); err != nil {
+        return err
+    }
+
+    if err = c.Rcpt(email); err != nil {
+        return err
+    }
+
+    // Data
+    w, err := c.Data()
+    if err != nil {
+        return err
+    }
+
+    _, err = w.Write(msg)
+    if err != nil {
+        return err
+    }
+
+    err = w.Close()
+    if err != nil {
+        return err
+    }
+
+    c.Quit()    
+
+	return nil
 }
