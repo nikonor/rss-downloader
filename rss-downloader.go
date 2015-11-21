@@ -135,13 +135,21 @@ func main() {
 	data_chan := make(chan Feed, rss_count)
 
 	for _, rss := range conf {
-		fmt.Printf("%s=%v\n",rss.Name,rss.LastPubDate);
 		go get_data(rss.Name, rss.URL, data_chan, rss.LastPubDate)
 	}
 
 	for i := 0; i < int(rss_count); i++ {
 		ss := <-data_chan
-		fmt.Println(ss)
+		mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n";
+		header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: RSS Downloader digest!\n"
+		msg := []byte(header + mime + ss.String())		
+		// fmt.Printf("===========\n%s\n===========\n",msg)
+		err := send_digest(smtp_conn,msg)
+		if err != nil {
+			log.Fatal(err)
+		} else {
+			fmt.Println("\tmail was sending");
+		}
 	}
 	fmt.Println("Finish main")
 }
@@ -189,6 +197,10 @@ func parse_rss(rss []byte, lastPubDate time.Time) Feed {
 	return f
 }
 
+func send_digest (conn smtp_conn_type, msg []byte) (error) {
+	return nil
+}
+
 func readConfig(filename string) (string, smtp_conn_type, []link){
 	var (
 		conf []link
@@ -214,7 +226,6 @@ func readConfig(filename string) (string, smtp_conn_type, []link){
 			srv_str,_ := cfg.String(sections[i], "smtp_server")
 			s_conn.Host, s_conn.Port, _ = net.SplitHostPort(srv_str)
 		} else {
-			fmt.Printf("!%s!\n", sections[i])
 			url, _ := cfg.String(sections[i], "url")
 			t_string, _ := cfg.String(sections[i], "lastPubDate")
 			t_time,_ := time.Parse(timeForm,t_string)
