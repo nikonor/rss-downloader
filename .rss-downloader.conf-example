@@ -1,8 +1,13 @@
 [DEFAULT]
 email=nikonor@nikonor.ru
+smtp_login=e@mail
+smtp_passwd=PasSwOrD
+smtp_server="smtp.yandex.ru:465"
+
 [Lifehacker.ru]
 url=http://lifehacker.ru/feed/
 lastPubDate=2015-01-01 00:00:01 +0000 GMT
+
 [Блог Никонова]
 url=http://a-nikonov.livejournal.com/data/rss
 lastPubDate=2015-01-01 00:00:01 +0000 GMT
