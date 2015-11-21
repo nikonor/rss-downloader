@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/user"
 	"strings"
 	"time"
-	"os/user"
 	"github.com/robfig/config"
 	"html/template"
 	"bytes"
@@ -43,6 +44,17 @@ type Channel struct {
 
 type Feed struct {
 	Channel *Channel `xml:"channel"`
+}
+
+type smtp_conn_type struct{
+	Login string
+	Password string
+	Host string
+	Port string
+}
+
+type rss struct {
+	Data map[string]string
 }
 
 func (f *Feed) Parse(body []byte) error {
@@ -108,17 +120,13 @@ var (
 	rss_count int
 	rsses     []rss
 	email	string
+	smtp_conn smtp_conn_type
 )
 
-type rss struct {
-	Data map[string]string
-}
 
 func init() {
-
-	email,conf = readConfig("")
+	email, smtp_conn, conf = readConfig("")
 	rss_count = len(conf)
-
 }
 
 func main() {
@@ -181,9 +189,13 @@ func parse_rss(rss []byte, lastPubDate time.Time) Feed {
 	return f
 }
 
-func readConfig(filename string) (string, []link){
-	var conf []link
-	var email string
+func readConfig(filename string) (string, smtp_conn_type, []link){
+	var (
+		conf []link
+		email string
+		s_conn smtp_conn_type
+	)
+
 	if filename == "" {
 		usr, _ := user.Current()
 		filename = strings.Join([]string{usr.HomeDir,".rss-downloader.conf"},"/")
@@ -195,9 +207,12 @@ func readConfig(filename string) (string, []link){
 	}
 	sections := cfg.Sections()
 	for i := range sections {
-
 		if sections[i] == "DEFAULT" {
 			email, _ = cfg.String(sections[i], "email")
+			s_conn.Login,_ = cfg.String(sections[i], "smtp_login")
+			s_conn.Password,_ = cfg.String(sections[i], "smtp_passwd")
+			srv_str,_ := cfg.String(sections[i], "smtp_server")
+			s_conn.Host, s_conn.Port, _ = net.SplitHostPort(srv_str)
 		} else {
 			fmt.Printf("!%s!\n", sections[i])
 			url, _ := cfg.String(sections[i], "url")
@@ -206,5 +221,6 @@ func readConfig(filename string) (string, []link){
 			conf = append(conf, link{sections[i],url,t_time})
 		}	
 	}
-	return email,conf
+
+	return email,s_conn,conf
 }
