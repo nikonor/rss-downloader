@@ -16,6 +16,7 @@ import (
 	"html/template"
 	"bytes"
 	"crypto/tls"
+	"regexp"
 )
 
 const timeForm = "2006-01-02 15:04:05 +0000 MST"
@@ -67,6 +68,7 @@ func (f *Feed) Parse(body []byte) error {
 func (f Feed) String() string {
 	var body bytes.Buffer
 	const tmpl = `{{.Title}}
+{{.PubDate}}
 <!DOCTYPE html>
 <html>
 	<head>
@@ -99,6 +101,7 @@ func (f Feed) String() string {
 	data := struct {
 		Title string
 		URL string
+		PubDate time.Time
 		Items []Rec
 	}{
 		Title:"",
@@ -108,6 +111,8 @@ func (f Feed) String() string {
 
 
 	data.Title = f.Channel.Title
+	data.URL = f.Channel.Link
+	data.PubDate = prepDate(f.Channel.PubDate)
 	for _, item := range f.Channel.Items {
 		data.Items = append(data.Items,Rec{	Title:item.Title, Link:item.Link, Date: item.PubDate, Text: template.HTML(item.Description) })
 	}
@@ -132,7 +137,6 @@ func init() {
 }
 
 func main() {
-	fmt.Println("Start main")
 
 	data_chan := make(chan Feed, rss_count)
 
@@ -142,20 +146,26 @@ func main() {
 
 	for i := 0; i < int(rss_count); i++ {
 		ss := <-data_chan
-		tmp := strings.SplitN(ss.String(),"\n",2); title := tmp[0]; body := tmp[1]
+		tmp := strings.SplitN(ss.String(),"\n",3); title := tmp[0]; newdate:=tmp[1]; body := tmp[2]
+
+		// заплатка: template возвращает HTML код, приходится переделывать
+		r, _ := regexp.Compile("&#43;")
+		newdate = string(r.ReplaceAll([]byte(newdate),[]byte("+"))[:])
 
 		mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n";
 		header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: "+title+" by RSS Downloader\n"
 		msg := []byte(header + mime + body)		
-		// fmt.Printf("===========\n%s\n===========\n",msg)
 		err := send_digest(smtp_conn,msg)
 		if err != nil {
 			log.Fatal(err)
 		} else {
-			fmt.Println("\tmail was sending");
+			err := updateConfig ("",title,"lastPubDate",newdate)
+			if err != nil {
+				panic(err)
+			}
+
 		}
 	}
-	fmt.Println("Finish main")
 }
 
 func get_data(name string, url string, ch chan Feed, lastPubDate time.Time) {
@@ -171,22 +181,18 @@ func get_data(name string, url string, ch chan Feed, lastPubDate time.Time) {
 		fmt.Printf("%s", err)
 		os.Exit(1)
 	}
-	ch <- parse_rss(contents, lastPubDate)
+	ch <- parse_rss(contents, lastPubDate, name)
 }
 
 
-func parse_rss(rss []byte, lastPubDate time.Time) Feed {
+func parse_rss(rss []byte, lastPubDate time.Time, section_name string) Feed {
 	f := Feed{}
 	var f_items []*Item
 
 	err := f.Parse(rss)
 
 	for _, item := range f.Channel.Items {
-		item_date,d_err := time.Parse(time.RFC1123Z,item.PubDate)
-		if d_err != nil {
-			item_date,_ = time.Parse(time.RFC1123,item.PubDate)
-		}
-
+		item_date := prepDate(item.PubDate)
 		if item_date.After(lastPubDate) {
 			f_items = append(f_items,item)
 		}
@@ -196,11 +202,41 @@ func parse_rss(rss []byte, lastPubDate time.Time) Feed {
 		log.Fatal(err)
 	}
 
+	f.Channel.Title = section_name
 	f.Channel.Items = f_items
 
 	return f
 }
 
+
+func prepDate (d string) time.Time {
+	dd,d_err := time.Parse(time.RFC1123Z,d)
+	if d_err != nil {
+		dd,_ = time.Parse(time.RFC1123,d)
+	}
+	return dd
+}
+
+func updateConfig(filename string, section string, key string, value string ) (error) {
+	if filename == "" {
+		usr, _ := user.Current()
+		filename = strings.Join([]string{usr.HomeDir,".rss-downloader.conf"},"/")
+	}
+
+	cfg, err := config.ReadDefault(filename)
+	if err != nil {
+		panic("Error on read config file")
+	}
+
+	cfg.AddOption(section, key, value)
+
+	cfg.WriteFile(filename,0644,"rss downloader config file")
+	if err != nil {
+		return err
+	} 
+
+	return nil
+}
 
 func readConfig(filename string) (string, smtp_conn_type, []link){
 	var (
@@ -236,7 +272,7 @@ func readConfig(filename string) (string, smtp_conn_type, []link){
 
 	return email,s_conn,conf
 }
-
+// copy & past https://gist.github.com/chrisgillis/10888032
 func send_digest (smtp_conn smtp_conn_type, msg []byte) (error) {
 	servername := strings.Join([]string{smtp_conn.Host,smtp_conn.Port},":")
 
@@ -258,12 +294,10 @@ func send_digest (smtp_conn smtp_conn_type, msg []byte) (error) {
         return err
     }
 
-    // Auth
     if err = c.Auth(auth); err != nil {
         return err
     }
 
- 	// To && From
     if err = c.Mail(smtp_conn.Login); err != nil {
         return err
     }
@@ -272,7 +306,6 @@ func send_digest (smtp_conn smtp_conn_type, msg []byte) (error) {
         return err
     }
 
-    // Data
     w, err := c.Data()
     if err != nil {
         return err
