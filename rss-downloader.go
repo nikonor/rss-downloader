@@ -19,7 +19,10 @@ import (
 	"regexp"
 )
 
-const timeForm = "2006-01-02 15:04:05 +0000 MST"
+const (
+	timeForm = "2006-01-02 15:04:05 +0000 MST"
+	timeForm2 = "2006-01-02 15:04:05 +0000 +0000"
+)
 
 type link struct {
 	Name string
@@ -113,8 +116,14 @@ func (f Feed) String() string {
 	data.Title = f.Channel.Title
 	data.URL = f.Channel.Link
 	data.PubDate = prepDate(f.Channel.PubDate)
+	d_time := data.PubDate.String()
+
+	if len(f.Channel.Items) == 0 {
+		return ""
+	}
+
 	for _, item := range f.Channel.Items {
-		data.Items = append(data.Items,Rec{	Title:item.Title, Link:item.Link, Date: item.PubDate, Text: template.HTML(item.Description) })
+		data.Items = append(data.Items,Rec{	Title:item.Title, Link:item.Link, Date: d_time, Text: template.HTML(item.Description) })
 	}
 	
 	t,_ := template.New("webpage").Parse(tmpl)
@@ -146,24 +155,29 @@ func main() {
 
 	for i := 0; i < int(rss_count); i++ {
 		ss := <-data_chan
-		tmp := strings.SplitN(ss.String(),"\n",3); title := tmp[0]; newdate:=tmp[1]; body := tmp[2]
+		if len(ss.String()) != 0 {
+			tmp := strings.SplitN(ss.String(),"\n",3); title := tmp[0]; newdate:=tmp[1]; body := tmp[2]
 
-		// заплатка: template возвращает HTML код, приходится переделывать
-		r, _ := regexp.Compile("&#43;")
-		newdate = string(r.ReplaceAll([]byte(newdate),[]byte("+"))[:])
+			// заплатка: template возвращает HTML код, приходится переделывать
+			r, _ := regexp.Compile("&#43;")
+			newdate = string(r.ReplaceAll([]byte(newdate),[]byte("+"))[:])
 
-		mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n";
-		header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: "+title+" by RSS Downloader\n"
-		msg := []byte(header + mime + body)		
-		err := send_digest(smtp_conn,msg)
-		if err != nil {
-			log.Fatal(err)
-		} else {
-			err := updateConfig ("",title,"lastPubDate",newdate)
+			mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n";
+			header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: "+title+" by RSS Downloader\n"
+			msg := []byte(header + mime + body)		
+			err := send_digest(smtp_conn,msg)
 			if err != nil {
-				panic(err)
-			}
+				log.Fatal(err)
+			} else {
+				fmt.Println("message was send");
+				err := updateConfig ("",title,"lastPubDate",newdate)
+				if err != nil {
+					panic(err)
+				}
 
+			}
+		} else {
+			fmt.Println("have not message for send")
 		}
 	}
 }
@@ -193,6 +207,7 @@ func parse_rss(rss []byte, lastPubDate time.Time, section_name string) Feed {
 
 	for _, item := range f.Channel.Items {
 		item_date := prepDate(item.PubDate)
+		// fmt.Printf("item_date=%v,item.PubDate=%v!\n",item_date,item.PubDate);
 		if item_date.After(lastPubDate) {
 			f_items = append(f_items,item)
 		}
@@ -210,9 +225,10 @@ func parse_rss(rss []byte, lastPubDate time.Time, section_name string) Feed {
 
 
 func prepDate (d string) time.Time {
-	dd,d_err := time.Parse(time.RFC1123Z,d)
+	loc, _ := time.LoadLocation("MSK")
+	dd,d_err := time.ParseInLocation(time.RFC1123,d,loc)
 	if d_err != nil {
-		dd,_ = time.Parse(time.RFC1123,d)
+		dd,_ = time.ParseInLocation(time.RFC1123Z,d,loc)
 	}
 	return dd
 }
@@ -265,7 +281,10 @@ func readConfig(filename string) (string, smtp_conn_type, []link){
 		} else {
 			url, _ := cfg.String(sections[i], "url")
 			t_string, _ := cfg.String(sections[i], "lastPubDate")
-			t_time,_ := time.Parse(timeForm,t_string)
+			t_time,t_err := time.Parse(timeForm,t_string)
+			if t_err != nil {
+				t_time,t_err = time.Parse(timeForm2,t_string)
+			}
 			conf = append(conf, link{sections[i],url,t_time})
 		}	
 	}
