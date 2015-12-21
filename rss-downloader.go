@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
-	"os"
+	// "os"
 	"os/user"
 	"strings"
 	"time"
@@ -82,7 +82,7 @@ func (f Feed) String() string {
 		<hr>
 		{{range .Items}}
 		<div>
-			<a href="{{.Link}}">{{.Title}} /{{.Date}}/</a><br>
+			<a href="{{.Link}}"><b>{{.Title}}</b> /{{.Date}}/</a><br>
 			<div>
 			{{.Text}}
 			</div>
@@ -172,7 +172,7 @@ func main() {
 				fmt.Println("message was send");
 				err := updateConfig ("",title,"lastPubDate",newdate)
 				if err != nil {
-					panic(err)
+					log.Fatal(err)
 				}
 
 			}
@@ -184,16 +184,15 @@ func main() {
 
 func get_data(name string, url string, ch chan Feed, lastPubDate time.Time) {
 	response, err := http.Get(url)
-
 	if err != nil {
 		fmt.Printf("%s", err)
-		os.Exit(1)
+		// os.Exit(1)
 	}
 	defer response.Body.Close()
 	contents, err := ioutil.ReadAll(response.Body)
 	if err != nil {
 		fmt.Printf("%s", err)
-		os.Exit(1)
+		// os.Exit(1)
 	}
 	ch <- parse_rss(contents, lastPubDate, name)
 }
