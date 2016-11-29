@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
-	// "os"
+	"os"
 	"os/user"
 	"strings"
 	"time"
@@ -141,7 +141,11 @@ var (
 
 
 func init() {
-	email, smtp_conn, conf = readConfig("")
+	configfile := ""
+	if len(os.Args) > 1 {
+		configfile = os.Args[1]
+	} 
+	email, smtp_conn, conf = readConfig(configfile)
 	rss_count = len(conf)
 }
 
