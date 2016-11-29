@@ -165,6 +165,9 @@ func main() {
 			// заплатка: template возвращает HTML код, приходится переделывать
 			r, _ := regexp.Compile("&#43;")
 			newdate = string(r.ReplaceAll([]byte(newdate),[]byte("+"))[:])
+			if strings.HasPrefix(newdate,"0001") {
+				newdate = time.Now().Format("2006-01-02 15:04:05 +0000 MST")
+			}
 
 			mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n";
 			header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: "+email+"\nSubject: "+title+" by RSS Downloader\n"
@@ -173,7 +176,7 @@ func main() {
 			if err != nil {
 				log.Fatal(err)
 			} else {
-				fmt.Println("message was send");
+				fmt.Println("message was send", newdate);
 				err := updateConfig ("",title,"lastPubDate",newdate)
 				if err != nil {
 					log.Fatal(err)
@@ -209,8 +212,9 @@ func parse_rss(rss []byte, lastPubDate time.Time, section_name string) Feed {
 	err := f.Parse(rss)
 
 	for _, item := range f.Channel.Items {
+		item.PubDate = strings.TrimSpace(item.PubDate)
 		item_date := prepDate(item.PubDate)
-		// fmt.Printf("item_date=%v,item.PubDate=%v!\n",item_date,item.PubDate);
+		// fmt.Printf("item_date=%v,item.PubDate=!%v!\n",item_date,item.PubDate);
 		if item_date.After(lastPubDate) {
 			f_items = append(f_items,item)
 		}
@@ -240,6 +244,9 @@ func updateConfig(filename string, section string, key string, value string ) (e
 	if filename == "" {
 		usr, _ := user.Current()
 		filename = strings.Join([]string{usr.HomeDir,".rss-downloader.conf"},"/")
+		if len(os.Args) > 1 {
+			filename = os.Args[1]
+		} 
 	}
 
 	cfg, err := config.ReadDefault(filename)
@@ -247,6 +254,7 @@ func updateConfig(filename string, section string, key string, value string ) (e
 		panic("Error on read config file")
 	}
 
+	fmt.Println(section, key, value)
 	cfg.AddOption(section, key, value)
 
 	cfg.WriteFile(filename,0644,"rss downloader config file")
