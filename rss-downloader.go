@@ -2,14 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
 	"html/template"
-	"io/ioutil"
 	"log"
 	"net"
-	"net/http"
 	"net/smtp"
 	"os"
 	"os/user"
@@ -18,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mmcdole/gofeed"
 	"github.com/robfig/config"
 )
 
@@ -71,7 +71,8 @@ func (f *Feed) Parse(body []byte) error {
 }
 
 func (f Feed) String() string {
-	if f.Channel == nil || f.Channel.Link == "" {
+	if f.Channel == nil {
+		fmt.Println("nop")
 		return ""
 	}
 
@@ -102,7 +103,7 @@ func (f Feed) String() string {
 		Title string
 		Link  string
 		Date  string
-		Text  interface{}
+		Text  any
 	}
 
 	var recs []Rec
@@ -160,7 +161,7 @@ func main() {
 
 	for _, rss := range conf {
 		wg.Add(1)
-		go get_data(wg, rss.Name, rss.URL, data_chan, rss.LastPubDate)
+		go getData(wg, rss.Name, rss.URL, data_chan, rss.LastPubDate)
 	}
 
 	wg.Wait()
@@ -183,7 +184,7 @@ func main() {
 			mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
 			header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: " + email + "\nSubject: " + title + " by RSS Downloader\n"
 			msg := []byte(header + mime + body)
-			err := send_digest(smtp_conn, msg)
+			err := sendDigest(smtp_conn, msg)
 			if err != nil {
 				log.Fatal(err)
 			} else {
@@ -200,13 +201,15 @@ func main() {
 	}
 }
 
-func get_data(wg *sync.WaitGroup, name string, url string, ch chan Feed, lastPubDate time.Time) {
+func getData(wg *sync.WaitGroup, name string, url string, ch chan Feed, lastPubDate time.Time) {
 	var (
 		data Feed
 		err  error
 	)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 	defer func() {
+		cancel()
 		if r := recover(); r != nil {
 			fmt.Println("Recovered from:", r)
 		}
@@ -214,48 +217,45 @@ func get_data(wg *sync.WaitGroup, name string, url string, ch chan Feed, lastPub
 		wg.Done()
 	}()
 
-	response, err := http.Get(url)
+	feed, err := gofeed.NewParser().ParseURLWithContext(url, ctx)
 	if err != nil {
-		fmt.Printf("%s\n", err)
+		fmt.Printf("!%s, %s\n", err, url)
 		return
-		// os.Exit(1)
-	}
-	defer response.Body.Close()
-	contents, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		fmt.Printf("%s\n", err)
-		return
-		// os.Exit(1)
 	}
 
-	data, err = parse_rss(contents, lastPubDate, name)
+	data, err = parseFeed(feed, lastPubDate, name)
 	if err != nil {
-		fmt.Printf("%s", err)
+		fmt.Printf("!!%s", err)
 		return
 	}
 }
 
-func parse_rss(rss []byte, lastPubDate time.Time, section_name string) (Feed, error) {
-	f := Feed{}
-	var f_items []*Item
+func parseFeed(feed *gofeed.Feed, lastPubDate time.Time, sectionName string) (Feed, error) {
+	var (
+		f     = Feed{Channel: &Channel{Items: make([]*Item, 0)}}
+		items []*Item
+	)
 
-	err := f.Parse(rss)
-
-	for _, item := range f.Channel.Items {
-		item.PubDate = strings.TrimSpace(item.PubDate)
-		item_date := prepDate(item.PubDate)
-		// fmt.Printf("item_date=%v,item.PubDate=!%v!\n",item_date,item.PubDate);
-		if item_date.After(lastPubDate) {
-			f_items = append(f_items, item)
+	for _, item := range feed.Items {
+		if item.PublishedParsed != nil && item.PublishedParsed.After(lastPubDate) {
+			author := make([]string, 0)
+			for _, a := range item.Authors {
+				author = append(author, fmt.Sprintf("%s <%s>", a.Name, a.Email))
+			}
+			items = append(items, &Item{
+				Title:       item.Title,
+				Description: item.Description,
+				Content:     item.Content,
+				Link:        item.Link,
+				Author:      strings.Join(author, ", "), // TODO
+				PubDate:     item.PublishedParsed.GoString(),
+			})
 		}
 	}
 
-	if err != nil {
-		return Feed{}, err
-	}
-
-	f.Channel.Title = section_name
-	f.Channel.Items = f_items
+	f.Channel.Title = sectionName
+	f.Channel.Items = items
+	f.Channel.Link = feed.FeedLink
 
 	return f, nil
 }
@@ -333,7 +333,7 @@ func readConfig(filename string) (string, smtp_conn_type, []link) {
 }
 
 // copy & past https://gist.github.com/chrisgillis/10888032
-func send_digest(smtp_conn smtp_conn_type, msg []byte) error {
+func sendDigest(smtp_conn smtp_conn_type, msg []byte) error {
 	servername := strings.Join([]string{smtp_conn.Host, smtp_conn.Port}, ":")
 
 	auth := smtp.PlainAuth("", smtp_conn.Login, smtp_conn.Password, smtp_conn.Host)
