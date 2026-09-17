@@ -1,4 +1,4 @@
-module rss-downloader
+module github.com/nikonor/rss-downloader
 
 go 1.26.5
 
