@@ -32,8 +32,10 @@ func main() {
 		go fetchDigest(wg, l, ch)
 	}
 
-	wg.Wait()
-	close(ch)
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
 
 	for d := range ch {
 		if d.body == "" {
