@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -11,45 +10,24 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-
-
-
-
-
-
-
-
-var (
-	configFile string
-	conf       []link
-	rssCount   int
-	email      string
-	smtpCfg    smtpConn
-)
-
-func init() {
-	var err error
-	configFile, err = defaultConfigPath()
+func main() {
+	configFile, err := defaultConfigPath()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("config path: %v", err)
 	}
 	if len(os.Args) > 1 {
 		configFile = os.Args[1]
 	}
 
-	email, smtpCfg, conf, err = readConfig(configFile)
+	email, smtpCfg, links, err := readConfig(configFile)
 	if err != nil {
 		log.Fatalf("read config: %v", err)
 	}
 
-	rssCount = len(conf)
-}
-
-func main() {
-	ch := make(chan digest, rssCount)
+	ch := make(chan digest, len(links))
 
 	wg := new(sync.WaitGroup)
-	for _, l := range conf {
+	for _, l := range links {
 		wg.Add(1)
 		go fetchDigest(wg, l, ch)
 	}
@@ -64,15 +42,15 @@ func main() {
 		}
 
 		subject := d.name + " by RSS Downloader"
-		err := sendMail(smtpCfg, email, subject, d.body)
-		if err != nil {
+		if err := sendMail(smtpCfg, email, subject, d.body); err != nil {
 			log.Printf("feed %s: send: %v", d.name, err)
 			continue
 		}
 
-		fmt.Println("message was send")
-		err = updateConfig(configFile, d.name, "lastPubDate", time.Now().Format(timeForm2))
-		if err != nil {
+		log.Printf("feed %s: message sent", d.name)
+
+		value := time.Now().Format(timeForm2)
+		if err := updateConfig(configFile, d.name, "lastPubDate", value); err != nil {
 			log.Printf("feed %s: update config: %v", d.name, err)
 		}
 	}
@@ -92,6 +70,3 @@ func fetchDigest(wg *sync.WaitGroup, l link, ch chan<- digest) {
 
 	ch <- digest{name: l.Name, body: renderDigest(l.Name, feed, l.LastPubDate)}
 }
-
-
-
