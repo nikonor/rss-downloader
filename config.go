@@ -30,7 +30,7 @@ type (
 	}
 )
 
-type smtp_conn_type = smtpConn
+
 
 func defaultConfigPath() (string, error) {
 	usr, err := user.Current()
