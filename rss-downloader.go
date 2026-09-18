@@ -8,29 +8,17 @@ import (
 	"fmt"
 	"html/template"
 	"log"
-	"net"
 	"net/smtp"
 	"os"
-	"os/user"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mmcdole/gofeed"
-	"github.com/robfig/config"
 )
 
-const (
-	timeForm  = "2006-01-02 15:04:05 +0000 MST"
-	timeForm2 = "2006-01-02 15:04:05 +0000 +0000"
-)
 
-type link struct {
-	Name        string
-	URL         string
-	LastPubDate time.Time
-}
 
 type Item struct {
 	Title       string `xml:"title"`
@@ -54,16 +42,7 @@ type Feed struct {
 	Channel *Channel `xml:"channel"`
 }
 
-type smtp_conn_type struct {
-	Login    string
-	Password string
-	Host     string
-	Port     string
-}
 
-type rss struct {
-	Data map[string]string
-}
 
 func (f *Feed) Parse(body []byte) error {
 	err := xml.Unmarshal(body, &f)
@@ -138,19 +117,28 @@ func (f Feed) String() string {
 }
 
 var (
-	conf      []link
-	rssCount  int
-	rsses     []rss
-	email     string
-	smtp_conn smtp_conn_type
+	configFile string
+	conf       []link
+	rssCount   int
+	email      string
+	smtpCfg    smtpConn
 )
 
 func init() {
-	configfile := ""
-	if len(os.Args) > 1 {
-		configfile = os.Args[1]
+	var err error
+	configFile, err = defaultConfigPath()
+	if err != nil {
+		log.Fatal(err)
 	}
-	email, smtp_conn, conf = readConfig(configfile)
+	if len(os.Args) > 1 {
+		configFile = os.Args[1]
+	}
+
+	email, smtpCfg, conf, err = readConfig(configFile)
+	if err != nil {
+		log.Fatalf("read config: %v", err)
+	}
+
 	rssCount = len(conf)
 }
 
@@ -184,12 +172,12 @@ func main() {
 			mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
 			header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: " + email + "\nSubject: " + title + " by RSS Downloader\n"
 			msg := []byte(header + mime + body)
-			err := sendDigest(smtp_conn, msg)
+			err := sendDigest(smtpCfg, msg)
 			if err != nil {
 				log.Fatal(err)
 			} else {
 				fmt.Println("message was send", newdate)
-				err := updateConfig("", title, "lastPubDate", newdate)
+				err := updateConfig(configFile, title, "lastPubDate", newdate)
 				if err != nil {
 					log.Fatal(err)
 				}
@@ -269,68 +257,7 @@ func prepDate(d string) time.Time {
 	return dd
 }
 
-func updateConfig(filename string, section string, key string, value string) error {
-	if filename == "" {
-		usr, _ := user.Current()
-		filename = strings.Join([]string{usr.HomeDir, ".rss-downloader.conf"}, "/")
-		if len(os.Args) > 1 {
-			filename = os.Args[1]
-		}
-	}
 
-	cfg, err := config.ReadDefault(filename)
-	if err != nil {
-		panic("Error on read config file")
-	}
-
-	fmt.Println(section, key, value)
-	cfg.AddOption(section, key, value)
-
-	cfg.WriteFile(filename, 0644, "rss downloader config file")
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func readConfig(filename string) (string, smtp_conn_type, []link) {
-	var (
-		conf   []link
-		email  string
-		s_conn smtp_conn_type
-	)
-
-	if filename == "" {
-		usr, _ := user.Current()
-		filename = strings.Join([]string{usr.HomeDir, ".rss-downloader.conf"}, "/")
-	}
-
-	cfg, err := config.ReadDefault(filename)
-	if err != nil {
-		panic("Error on read config file")
-	}
-	sections := cfg.Sections()
-	for i := range sections {
-		if sections[i] == "DEFAULT" {
-			email, _ = cfg.String(sections[i], "email")
-			s_conn.Login, _ = cfg.String(sections[i], "smtp_login")
-			s_conn.Password, _ = cfg.String(sections[i], "smtp_passwd")
-			srv_str, _ := cfg.String(sections[i], "smtp_server")
-			s_conn.Host, s_conn.Port, _ = net.SplitHostPort(srv_str)
-		} else {
-			url, _ := cfg.String(sections[i], "url")
-			t_string, _ := cfg.String(sections[i], "lastPubDate")
-			t_time, t_err := time.Parse(timeForm, t_string)
-			if t_err != nil {
-				t_time, t_err = time.Parse(timeForm2, t_string)
-			}
-			conf = append(conf, link{sections[i], url, t_time})
-		}
-	}
-
-	return email, s_conn, conf
-}
 
 // copy & past https://gist.github.com/chrisgillis/10888032
 func sendDigest(smtp_conn smtp_conn_type, msg []byte) error {
