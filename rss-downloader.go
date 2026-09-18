@@ -3,12 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/xml"
 	"fmt"
 	"html/template"
 	"log"
-	"net/smtp"
 	"os"
 	"regexp"
 	"strings"
@@ -169,19 +167,17 @@ func main() {
 				newdate = time.Now().Format("2006-01-02 15:04:05 +0000 MST")
 			}
 
-			mime := "MIME-version: 1.0;\nContent-Type: text/html; charset=\"UTF-8\";\n\n"
-			header := "From: RSS Downloader<rss-dl@nikonor.ru>\nTo: " + email + "\nSubject: " + title + " by RSS Downloader\n"
-			msg := []byte(header + mime + body)
-			err := sendDigest(smtpCfg, msg)
+			subject := title + " by RSS Downloader"
+			err := sendMail(smtpCfg, email, subject, body)
 			if err != nil {
-				log.Fatal(err)
-			} else {
-				fmt.Println("message was send", newdate)
-				err := updateConfig(configFile, title, "lastPubDate", newdate)
-				if err != nil {
-					log.Fatal(err)
-				}
+				log.Printf("feed %s: send: %v", title, err)
+				continue
+			}
 
+			fmt.Println("message was send")
+			err = updateConfig(configFile, title, "lastPubDate", newdate)
+			if err != nil {
+				log.Printf("feed %s: update config: %v", title, err)
 			}
 		} else {
 			fmt.Println("have not message for send")
@@ -259,56 +255,3 @@ func prepDate(d string) time.Time {
 
 
 
-// copy & past https://gist.github.com/chrisgillis/10888032
-func sendDigest(smtp_conn smtp_conn_type, msg []byte) error {
-	servername := strings.Join([]string{smtp_conn.Host, smtp_conn.Port}, ":")
-
-	auth := smtp.PlainAuth("", smtp_conn.Login, smtp_conn.Password, smtp_conn.Host)
-
-	// TLS config
-	tlsconfig := &tls.Config{
-		InsecureSkipVerify: true,
-		ServerName:         smtp_conn.Host,
-	}
-
-	conn, err := tls.Dial("tcp", ""+servername, tlsconfig)
-	if err != nil {
-		return err
-	}
-
-	c, err := smtp.NewClient(conn, smtp_conn.Host)
-	if err != nil {
-		return err
-	}
-
-	if err = c.Auth(auth); err != nil {
-		return err
-	}
-
-	if err = c.Mail(smtp_conn.Login); err != nil {
-		return err
-	}
-
-	if err = c.Rcpt(email); err != nil {
-		return err
-	}
-
-	w, err := c.Data()
-	if err != nil {
-		return err
-	}
-
-	_, err = w.Write(msg)
-	if err != nil {
-		return err
-	}
-
-	err = w.Close()
-	if err != nil {
-		return err
-	}
-
-	c.Quit()
-
-	return nil
-}
