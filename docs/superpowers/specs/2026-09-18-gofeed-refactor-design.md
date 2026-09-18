@@ -39,16 +39,17 @@
 readConfig (INI) → []link{Name, URL, LastPubDate}, email, smtpConn
         │
 main:  для каждого link → go fetchDigest(link, ch)
-        │                    ├─ gofeed.ParseURLWithContext (таймаут 5с)
-        │                    ├─ renderDigest(name, feed, lastPubDate) → HTML или ""
-        │                    └─ ch ← digest{name, body}
-        │
-wg.Wait() → close(ch) → for range ch:
-        body == "" → log "no new items", continue
-        sendMail(conn, email, subject, body)
-            ошибка → log, continue (config НЕ обновляем)
-            успех  → updateConfig(filename, name, now)
-        │
+         │                    ├─ gofeed.ParseURLWithContext (таймаут 5с)
+         │                    ├─ renderDigest(name, feed, lastPubDate) → HTML или ""
+         │                    └─ ch ← digest{name, body}
+         │
+         в отдельной горутине: wg.Wait() → close(ch)
+         параллельно (сразу, не дожидаясь всех fetch'ей): for range ch:
+             body == "" → log "no new items", continue
+             sendMail(conn, email, subject, body)
+                 ошибка → log, continue (config НЕ обновляем)
+                 успех  → updateConfig(filename, name, now)
+         │
 exit 0 (всегда)
 ```
 
@@ -71,8 +72,9 @@ exit 0 (всегда)
   - резолвит путь к файлу конфига один раз (`os.Args[1]` или `~/.rss-downloader.conf` по умолчанию) и передаёт его явно в `readConfig`/`updateConfig`;
   - `readConfig`;
   - создаёт буферизованный канал `chan digest` ёмкостью `len(links)` (записи никогда не блокируются: каждая горутина пишет не более одного `digest`);
-  - запускает `fetchDigest` в горутинах под `sync.WaitGroup`;
-  - `wg.Wait()`, `close(ch)`, цикл `for range ch`;
+   - запускает `fetchDigest` в горутинах под `sync.WaitGroup`;
+   - `wg.Wait()` + `close(ch)` — в отдельной горутине, параллельно с основным циклом;
+   - цикл `for range ch` идёт сразу: письма уходят по мере готовности фидов, не дожидаясь всех fetch'ей;
   - для непустого `digest`: `sendMail` → при успехе `updateConfig`; при ошибке отправки — только лог.
 - `fetchDigest(link, chan<- digest)`:
   - `context.WithTimeout(context.Background(), 5*time.Second)` на фи́д (как сейчас);
